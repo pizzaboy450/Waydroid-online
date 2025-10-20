@@ -1,0 +1,71 @@
+name: Linux VM with Waydroid
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 */6 * * *" # Optional: auto-run every 6 hours
+
+jobs:
+  waydroid:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v4
+
+    - name: Restore previous session files
+      uses: actions/download-artifact@v4
+      continue-on-error: true
+      with:
+        name: linux-vm-data
+        path: /home/runner/data
+
+    - name: Install Tailscale
+      run: |
+        curl -fsSL https://tailscale.com/install.sh | sh
+        sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-linux-waydroid
+        sleep 10
+        ip=$(tailscale ip -4)
+        echo "TAILSCALE_IP=$ip" >> $GITHUB_ENV
+
+    - name: Install dependencies for Waydroid
+      run: |
+        sudo apt update
+        sudo apt install -y curl wget lxc python3 python3-pip adb git sudo
+        sudo apt install -y squashfs-tools e2fsprogs android-tools-adb android-tools-fastboot
+
+    - name: Install Waydroid
+      run: |
+        sudo curl https://repo.waydro.id/waydroid.gpg -o /usr/share/keyrings/waydroid-archive-keyring.gpg
+        echo "deb [signed-by=/usr/share/keyrings/waydroid-archive-keyring.gpg] https://repo.waydro.id/ bullseye main" | sudo tee /etc/apt/sources.list.d/waydroid.list
+        sudo apt update
+        sudo apt install -y waydroid
+        sudo waydroid init
+
+    - name: Start Waydroid headless
+      run: |
+        sudo systemctl start waydroid-container
+        sudo waydroid session start
+        echo "WAYDROID_RUNNING=true" >> $GITHUB_ENV
+
+    - name: Show connection info
+      run: |
+        echo "======================="
+        echo "Tailscale IP : $TAILSCALE_IP"
+        echo "Waydroid should now be running headless on the VM."
+        echo "Access the container via ADB over TCP:"
+        echo "adb connect $TAILSCALE_IP:5555"
+        echo "======================="
+        
+        while true; do
+          echo "[$(date)] Waydroid running..."
+          sleep 60
+        done
+
+    - name: Save session files
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: linux-vm-data
+        path: /home/runner/data
