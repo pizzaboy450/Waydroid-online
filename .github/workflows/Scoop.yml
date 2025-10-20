@@ -1,0 +1,65 @@
+name: Linux Waydroid (24/7 Browser Access)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 */6 * * *"  # auto-restart every 6 hours
+
+jobs:
+  waydroid:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Restore Waydroid data
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: waydroid-data
+          path: ~/waydroid-data
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y curl wget lxc python3 python3-pip git socat
+          sudo apt install -y x11vnc xvfb novnc websockify
+
+      - name: Install Waydroid
+        run: |
+          sudo curl https://repo.waydro.id/waydroid.gpg -o /usr/share/keyrings/waydroid.gpg
+          echo "deb [signed-by=/usr/share/keyrings/waydroid.gpg] https://repo.waydro.id/ focal main" | sudo tee /etc/apt/sources.list.d/waydroid.list
+          sudo apt update
+          sudo apt install -y waydroid
+
+      - name: Initialize Waydroid
+        run: |
+          sudo waydroid init
+          sudo waydroid container start
+
+      - name: Start Waydroid in headless X server
+        run: |
+          Xvfb :1 -screen 0 1080x1920x24 &
+          export DISPLAY=:1
+          waydroid session start
+
+      - name: Start noVNC
+        run: |
+          websockify --web=/usr/share/novnc/ 6080 localhost:5900 &
+          echo "Waydroid noVNC available at: http://localhost:6080/"
+
+      - name: Keep Waydroid running
+        run: |
+          while true; do
+            sleep 300
+            echo "Waydroid is running..."
+          done
+
+      - name: Save Waydroid session
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: waydroid-data
+          path: ~/waydroid-data
