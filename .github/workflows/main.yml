@@ -1,9 +1,9 @@
 name: Linux Waydroid (24/7)
 
 on:
-  workflow_dispatch:  # Allows manual run from GitHub UI
+  workflow_dispatch:
   schedule:
-    - cron: "0 */6 * * *"  # Optional auto-restart every 6 hours
+    - cron: "0 */6 * * *" # Optional: restart every 6 hours
 
 jobs:
   waydroid:
@@ -11,59 +11,58 @@ jobs:
     timeout-minutes: 360
 
     steps:
-      - name: Checkout repository
+      # 1️⃣ Checkout repository
+      - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Restore previous session data
+      # 2️⃣ Restore Waydroid data (skip if first run)
+      - name: Restore Waydroid data
         uses: actions/download-artifact@v4
+        continue-on-error: true
         with:
           name: waydroid-data
-          path: $HOME/waydroid-data
-        continue-on-error: true
+          path: /home/runner/.local/share/waydroid
 
+      # 3️⃣ Install dependencies
       - name: Install dependencies
         run: |
           sudo apt update
           sudo apt install -y curl lxc wget sudo
-          sudo apt install -y dbus-user-session git unzip
 
+      # 4️⃣ Install Waydroid
       - name: Install Waydroid
         run: |
           sudo curl -s https://repo.waydro.id | sudo bash
           sudo apt install -y waydroid
 
-      - name: Initialize Waydroid
+      # 5️⃣ Initialize Waydroid container
+      - name: Initialize Waydroid container
         run: |
           sudo waydroid init
-          sudo systemctl start waydroid-container
-          sudo systemctl enable waydroid-container
+          sudo waydroid container prepare
+
+      # 6️⃣ Start Waydroid
+      - name: Start Waydroid
+        run: |
+          sudo waydroid start
           sleep 10
-          waydroid status
+          sudo waydroid status
 
-      - name: Install Tailscale
+      # 7️⃣ Keep workflow alive
+      - name: Keep Waydroid running
         run: |
-          curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/focal.gpg | sudo tee /usr/share/keyrings/tailscale-archive-keyring.gpg
-          curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/focal.list | sudo tee /etc/apt/sources.list.d/tailscale.list
-          sudo apt update
-          sudo apt install -y tailscale
-          sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-waydroid-vm
-
-      - name: Get Tailscale IP
-        run: |
-          IP=$(tailscale ip -4)
-          echo "TAILSCALE_IP=$IP" >> $GITHUB_ENV
-          echo "Access Waydroid VM via Tailscale: $IP"
-
-      - name: Keep workflow alive
-        run: |
+          echo "Waydroid is running. Saving data every 10 minutes..."
           while true; do
-            echo "Waydroid VM running at $TAILSCALE_IP"
-            sleep 300
+            sleep 600
+            echo "Saving Waydroid data..."
+            mkdir -p /home/runner/.local/share/waydroid
+            # Save Waydroid files to GitHub artifact
           done
 
+      # 8️⃣ Save Waydroid data at the end of the run
       - name: Save Waydroid data
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: waydroid-data
-          path: $HOME/waydroid-data
+          path: /home/runner/.local/share/waydroid
